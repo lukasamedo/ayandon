@@ -1,0 +1,165 @@
+<!doctype html>
+<html lang="tr">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
+<title>Barkod Fiyat</title>
+<style>
+*{box-sizing:border-box}
+body{margin:0;background:#f3f4f6;color:#17202a;font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",sans-serif}
+header{background:#17365d;color:white;text-align:center;padding:20px;font-size:27px;font-weight:800}
+main{max-width:600px;margin:auto;padding:15px}
+.card{background:white;border-radius:18px;padding:18px;margin-bottom:15px;box-shadow:0 3px 14px #0002}
+button,input{width:100%;padding:15px;border-radius:12px;font-size:17px}
+button{border:0;background:#17365d;color:white;font-weight:800;margin-top:10px}
+input{border:1px solid #ccd2d9;margin-top:10px}
+.gray{background:#667085}
+#reader{display:none;width:100%;margin-top:14px;border-radius:14px;overflow:hidden}
+#reader video{width:100%!important;border-radius:14px}
+#result{text-align:center;margin-top:15px}
+.prod{font-size:25px;font-weight:800}
+.price{font-size:52px;font-weight:900;color:#087a3f}
+.code{color:#667085;margin-top:5px}
+.small{text-align:center;color:#667085;font-size:14px;margin-top:9px}
+.item{padding:12px 0;border-bottom:1px solid #eee}
+</style>
+<script src="https://unpkg.com/html5-qrcode@2.3.8/html5-qrcode.min.js"></script>
+</head>
+<body>
+<header>📱 Barkod Fiyat</header>
+<main>
+<section class="card">
+<div><b>Kitabın altındaki çizgili ISBN barkodunu</b> kameraya gösterin.</div>
+<button id="start" onclick="scan()">📷 Barkod Oku</button>
+<div id="reader"></div>
+<button id="stop" class="gray" style="display:none" onclick="closeCamera()">Kamerayı Kapat</button>
+<div id="result">
+<div class="prod" id="nameOut"></div>
+<div class="price" id="priceOut"></div>
+<div class="code" id="codeOut"></div>
+</div>
+</section>
+
+<section class="card">
+<h2>Ürün / Fiyat Ekle</h2>
+<input id="barcode" inputmode="numeric" placeholder="Barkod (örn. 9786257779760)">
+<input id="name" placeholder="Ürün adı">
+<input id="price" inputmode="decimal" placeholder="Fiyat (TL)">
+<button onclick="save()">Kaydet</button>
+</section>
+
+<section class="card">
+<h2>Ürünler (<span id="count">0</span>)</h2>
+<div id="list"></div>
+</section>
+</main>
+
+<script>
+let db=JSON.parse(localStorage.getItem("barkot-fiyat")||"{}");
+let qr=null;
+
+function money(x){return Number(x).toLocaleString("tr-TR",{minimumFractionDigits:2,maximumFractionDigits:2})+" TL"}
+
+function show(code){
+ code=String(code).replace(/\s/g,"");
+ document.getElementById("barcode").value=code;
+ document.getElementById("codeOut").textContent="Barkod: "+code;
+ if(db[code]){
+   document.getElementById("nameOut").textContent=db[code].name;
+   document.getElementById("priceOut").textContent=money(db[code].price);
+ }else{
+   document.getElementById("nameOut").textContent="Ürün kayıtlı değil";
+   document.getElementById("priceOut").textContent="";
+ }
+}
+
+async function scan(){
+ if(!window.Html5Qrcode){alert("Barkod okuyucu yüklenemedi. Sayfayı yenileyin.");return}
+ await closeCamera();
+ document.getElementById("reader").style.display="block";
+ document.getElementById("start").style.display="none";
+ document.getElementById("stop").style.display="block";
+
+ qr=new Html5Qrcode("reader");
+
+ try{
+   await qr.start(
+     {facingMode:{exact:"environment"}},
+     {
+       fps:12,
+       qrbox:{width:300,height:140},
+       aspectRatio:1.777,
+       formatsToSupport:[
+         Html5QrcodeSupportedFormats.EAN_13,
+         Html5QrcodeSupportedFormats.EAN_8,
+         Html5QrcodeSupportedFormats.UPC_A,
+         Html5QrcodeSupportedFormats.UPC_E
+       ]
+     },
+     async text=>{
+       // Kitap ISBN barkodları EAN-13 olarak gelir.
+       show(text);
+       await closeCamera();
+     },
+     ()=>{}
+   );
+ }catch(e){
+   try{
+     await qr.start(
+       {facingMode:"environment"},
+       {
+         fps:12,
+         qrbox:{width:300,height:140},
+         formatsToSupport:[Html5QrcodeSupportedFormats.EAN_13,Html5QrcodeSupportedFormats.EAN_8]
+       },
+       async text=>{show(text);await closeCamera();},
+       ()=>{}
+     );
+   }catch(e2){
+     alert("Kamera başlatılamadı. Safari'de bu site için kamera izni açık olmalı.");
+     await closeCamera();
+   }
+ }
+}
+
+async function closeCamera(){
+ if(qr){
+   try{if(qr.isScanning) await qr.stop()}catch(e){}
+   try{qr.clear()}catch(e){}
+ }
+ qr=null;
+ document.getElementById("reader").innerHTML="";
+ document.getElementById("reader").style.display="none";
+ document.getElementById("start").style.display="block";
+ document.getElementById("stop").style.display="none";
+}
+
+function save(){
+ const b=document.getElementById("barcode").value.trim();
+ const n=document.getElementById("name").value.trim();
+ const p=document.getElementById("price").value.replace(",",".").trim();
+ if(!b||!n||!p){alert("Üç alanı da doldurun.");return}
+ db[b]={name:n,price:Number(p)};
+ localStorage.setItem("barkot-fiyat",JSON.stringify(db));
+ render();show(b);
+ document.getElementById("name").value="";
+ document.getElementById("price").value="";
+}
+
+function removeItem(b){
+ delete db[b];
+ localStorage.setItem("barkot-fiyat",JSON.stringify(db));
+ render();
+}
+
+function render(){
+ const rows=Object.entries(db);
+ document.getElementById("count").textContent=rows.length;
+ document.getElementById("list").innerHTML=rows.map(([b,p])=>
+ `<div class="item"><b>${p.name}</b><br>${b} — ${money(p.price)}<button class="gray" onclick="removeItem('${b}')">Sil</button></div>`
+ ).join("") || "<div class='small'>Henüz ürün eklenmedi.</div>";
+}
+render();
+</script>
+</body>
+</html>
