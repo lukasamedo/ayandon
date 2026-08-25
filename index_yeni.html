@@ -1,0 +1,160 @@
+<!doctype html>
+<html lang="tr">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
+<meta name="theme-color" content="#17365d">
+<title>Barkod Fiyat</title>
+<style>
+*{box-sizing:border-box}body{margin:0;background:#f3f5f7;color:#17202a;font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",sans-serif}
+header{background:#17365d;color:#fff;padding:18px;text-align:center;font-size:23px;font-weight:800}
+main{max-width:600px;margin:auto;padding:14px}.card{background:#fff;border-radius:18px;padding:18px;margin-bottom:14px;box-shadow:0 3px 15px #0001}
+button,input{font:inherit}input{width:100%;padding:14px;border:1px solid #cbd2da;border-radius:11px;font-size:17px}
+button{border:0;border-radius:11px;padding:14px;background:#17365d;color:#fff;font-weight:700}.gray{background:#667085}.red{background:#b42318}
+#video{width:100%;display:block;border-radius:14px;background:#000;aspect-ratio:4/3;object-fit:cover}#camera{display:none}
+.name{text-align:center;font-size:25px;font-weight:800;margin-top:15px}.price{text-align:center;font-size:58px;font-weight:900;color:#087a3f;margin:5px 0}.sub{text-align:center;color:#667085}
+.row{display:flex;gap:8px}.row>*{flex:1}.note{padding:11px;border-radius:10px;background:#eef6ff;color:#17365d;font-size:14px}
+.item{display:flex;justify-content:space-between;align-items:center;padding:12px 0;border-bottom:1px solid #eee}.item:last-child{border:0}.item small{color:#667085}.actions{display:flex;gap:5px}.actions button{padding:8px 10px;font-size:13px}
+.hidden{display:none!important}
+</style>
+</head>
+<body>
+<header>📱 Barkod Fiyat</header>
+<main>
+<section class="card">
+<div class="note">Barkodu kameraya gösterin. Kayıtlı ürünün fiyatı anında çıkar.</div>
+<button id="scanBtn" onclick="startCamera()" style="width:100%;margin-top:12px">📷 Barkod Oku</button>
+<div id="camera" style="margin-top:12px">
+<video id="video" autoplay playsinline muted></video>
+<canvas id="canvas" class="hidden"></canvas>
+<div class="sub" style="margin-top:8px">Barkodu kameranın ortasına getirin.</div>
+<button class="gray" onclick="stopCamera()" style="width:100%;margin-top:8px">Kamerayı Kapat</button>
+</div>
+<div id="status" class="sub" style="margin-top:10px"></div>
+<div id="result" class="hidden">
+<div id="rname" class="name"></div><div id="rprice" class="price"></div><div id="rbar" class="sub"></div>
+</div>
+</section>
+
+<section class="card">
+<h2>Ürün Ekle / Fiyat Değiştir</h2>
+<input id="bar" inputmode="numeric" placeholder="Barkod">
+<br><br><input id="pname" placeholder="Ürün adı">
+<br><br><input id="price" inputmode="decimal" placeholder="Fiyat (TL)">
+<div class="row" style="margin-top:10px"><button onclick="save()">Kaydet</button><button class="gray" onclick="clearForm()">Temizle</button></div>
+</section>
+
+<section class="card">
+<h2>Ürünler <small id="count"></small></h2>
+<input id="q" oninput="render()" placeholder="Ürün veya barkod ara">
+<div id="list"></div>
+</section>
+</main>
+
+<script>
+const KEY="barkod-fiyat-urunler";
+let db=JSON.parse(localStorage.getItem(KEY)||"{}");
+let stream=null, scanning=false, lastCode="", lastTime=0;
+
+const $=id=>document.getElementById(id);
+const money=x=>Number(x).toLocaleString("tr-TR",{minimumFractionDigits:2,maximumFractionDigits:2})+" TL";
+
+function persist(){localStorage.setItem(KEY,JSON.stringify(db))}
+function esc(s){return String(s).replace(/[&<>"']/g,c=>({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#039;"}[c]))}
+
+function show(b){
+ b=String(b).trim();
+ const p=db[b];
+ $("result").classList.toggle("hidden",!p);
+ if(p){
+   $("rname").textContent=p.name;
+   $("rprice").textContent=money(p.price);
+   $("rbar").textContent="Barkod: "+b;
+ }else{
+   $("rname").textContent="Kayıtlı ürün bulunamadı";
+   $("rprice").textContent="";
+   $("rbar").textContent=b;
+ }
+}
+
+async function startCamera(){
+ if(!window.isSecureContext){
+   $("status").textContent="Kamera için HTTPS bağlantısı gerekli.";
+   return;
+ }
+ if(!navigator.mediaDevices || !navigator.mediaDevices.getUserMedia){
+   $("status").textContent="Bu tarayıcı kamera erişimini desteklemiyor.";
+   return;
+ }
+ try{
+   $("status").textContent="Kamera açılıyor...";
+   stream=await navigator.mediaDevices.getUserMedia({
+     video:{facingMode:{ideal:"environment"},width:{ideal:1280},height:{ideal:720}},
+     audio:false
+   });
+   $("video").srcObject=stream;
+   $("camera").style.display="block";
+   $("scanBtn").classList.add("hidden");
+   $("status").textContent="Barkodu kameranın ortasına getirin.";
+   scanning=true;
+   if("BarcodeDetector" in window){
+     const formats=["ean_13","ean_8","upc_a","upc_e","code_128","code_39","itf"];
+     let detector;
+     try{detector=new BarcodeDetector({formats})}catch(e){detector=new BarcodeDetector()}
+     scanNative(detector);
+   }else{
+     $("status").textContent="Bu Safari sürümünde yerleşik barkod okuyucu yok. Barkod numarasını aşağıdan elle girebilirsiniz.";
+   }
+ }catch(e){
+   console.error(e);
+   $("status").textContent="Kamera açılamadı. Safari için Kamera izni açık olmalı.";
+   $("camera").style.display="none";
+   $("scanBtn").classList.remove("hidden");
+ }
+}
+
+async function scanNative(detector){
+ if(!scanning)return;
+ try{
+   const codes=await detector.detect($("video"));
+   if(codes.length){
+     const value=codes[0].rawValue;
+     const now=Date.now();
+     if(value && (value!==lastCode || now-lastTime>2000)){
+       lastCode=value;lastTime=now;show(value);
+       stopCamera();
+       return;
+     }
+   }
+ }catch(e){}
+ requestAnimationFrame(()=>scanNative(detector));
+}
+
+function stopCamera(){
+ scanning=false;
+ if(stream){stream.getTracks().forEach(t=>t.stop());stream=null}
+ $("video").srcObject=null;
+ $("camera").style.display="none";
+ $("scanBtn").classList.remove("hidden");
+ $("status").textContent="";
+}
+
+function save(){
+ let b=$("bar").value.trim(), n=$("pname").value.trim(), p=$("price").value.replace(",",".").trim();
+ if(!b||!n||p===""){alert("Barkod, ürün adı ve fiyat zorunlu.");return}
+ db[b]={name:n,price:Number(p)||0};persist();show(b);render();clearForm();alert("Kaydedildi.");
+}
+function clearForm(){$("bar").value="";$("pname").value="";$("price").value=""}
+function edit(b){let p=db[b];$("bar").value=b;$("pname").value=p.name;$("price").value=p.price;scrollTo({top:document.body.scrollHeight,behavior:"smooth"})}
+function del(b){if(confirm(db[b].name+" silinsin mi?")){delete db[b];persist();render()}}
+function render(){
+ let q=$("q").value.toLowerCase();
+ $("count").textContent="("+Object.keys(db).length+")";
+ $("list").innerHTML=Object.entries(db).filter(([b,p])=>(b+" "+p.name).toLowerCase().includes(q)).map(([b,p])=>
+ `<div class="item"><div><b>${esc(p.name)}</b><br><small>${esc(b)} · ${money(p.price)}</small></div><div class="actions"><button onclick="edit('${esc(b)}')">Düzenle</button><button class="red" onclick="del('${esc(b)}')">Sil</button></div></div>`
+ ).join("");
+}
+render();
+</script>
+</body>
+</html>
